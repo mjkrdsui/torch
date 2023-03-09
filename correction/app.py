@@ -45,7 +45,7 @@ def handler(event, context):
     new_local_path = '/tmp/' + currentDate + '-' + currentTime + '-after'
     cv2.imwrite(new_local_path, dst2)
     #別のs3へ保存
-    time.sleep(10)
+    time.sleep(9)
     bucket2 = s3.Bucket('torch-image-corrected')
     bucket2.upload_file(new_local_path, file_name)
     return
