@@ -1,0 +1,201 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Main Template For Slot
+Metadata:
+  "AWS::CloudFormation::Interface":
+    ParameterGroups:
+      - Label: 
+          default: "Network Configuration"
+        Parameters: 
+          - VPCCIDR
+          - PublicSubnet1CIDR
+          - PublicSubnet2CIDR
+          - PrivateSubnet1CIDR
+          - PrivateSubnet2CIDR
+      - Label:
+          default: "InternetALB"
+        Parameters:
+          - ALBName
+          - TargetGroupName
+          - HostZoneId
+          - DomainName
+          - SubDomain
+      - Label:
+          default: "ECS"
+        Parameters:
+          - ClusterName
+          - TaskName
+          - TaskCPUUnit
+          - TaskMemory
+          - ContainerName
+          - ImageName
+          - ServiceName
+          - TaskDesiredCount
+      - Label:
+          default: "AutScaling"
+        Parameters:
+          - ServiceScaleEvaluationPeriods
+          - ServiceCpuScaleOutThreshold
+          - ServiceCpuScaleInThreshold
+          - TaskMinContainerCount
+          - TaskMaxContainerCount
+Parameters:
+          
+  VPCCIDR:
+    Type: String
+    Default: "10.1.0.0/16"
+
+  PublicSubnet1CIDR:
+    Type: String
+    Default: "10.1.0.0/24"
+
+  PublicSubnet2CIDR:
+    Type: String
+    Default: "10.1.2.0/24"
+
+  PrivateSubnet1CIDR:
+    Type: String
+    Default: "10.1.1.0/24"
+
+  PrivateSubnet2CIDR:
+    Type: String
+    Default: "10.1.3.0/24"
+#InternetALB
+  ALBName:
+    Type: String
+    Default: "torch-alb"
+#TargetGroupName
+  TargetGroupName:
+    Type: String
+    Default: "torch-tg"
+  HostZoneId:
+    Type: String
+  DomainName:
+    Type: String
+    Default: 'mjk-entama.com'
+  SubDomain:
+    Type: String
+    Default: 'torch.mjk-entama.com'
+#ECSClusterName
+  ClusterName:
+    Type: String
+    Default: "torch-cluster"
+
+#ECSTaskName
+  TaskName:
+    Type: String
+    Default: "torch-task"
+
+#ECSTaskCPUUnit
+  TaskCPUUnit:
+    AllowedValues: [ 256, 512, 1024, 2048, 4096  ]
+    Type: String
+    Default: "256"
+
+#ECSTaskMemory
+  TaskMemory:
+    AllowedValues: [ 256, 512, 1024, 2048, 4096  ]
+    Type: String
+    Default: "512"
+
+#ECSContainerName
+  ContainerName:
+    Type: String
+    Default: "torch-container"
+
+#ECSImageName
+  ImageName:
+    Type: String
+
+#ECSServiceName
+  ServiceName:
+    Type: String
+    Default: "torch-service"
+
+#ECSTaskDesiredCount
+  TaskDesiredCount:
+    Type: Number
+    Default: 2
+
+# Scaling params
+  ServiceScaleEvaluationPeriods:
+    Description: The number of periods over which data is compared to the specified threshold
+    Type: Number
+    Default: 2
+    MinValue: 2
+
+  ServiceCpuScaleOutThreshold:
+    Type: Number
+    Description: Average CPU value to trigger auto scaling out
+    Default: 50
+    MinValue: 0
+    MaxValue: 100
+    ConstraintDescription: Value must be between 0 and 100
+
+  ServiceCpuScaleInThreshold:
+    Type: Number
+    Description: Average CPU value to trigger auto scaling in
+    Default: 25
+    MinValue: 0
+    MaxValue: 100
+    ConstraintDescription: Value must be between 0 and 100
+
+  TaskMinContainerCount:
+    Type: Number
+    Description: Minimum number of containers to run for the service
+    Default: 1
+    MinValue: 1
+    ConstraintDescription: Value must be at least one
+
+  TaskMaxContainerCount:
+    Type: Number
+    Description: Maximum number of containers to run for the service when auto scaling out
+    Default: 2
+    MinValue: 1
+    ConstraintDescription: Value must be at least one
+  
+Resources:
+
+  LAMBDA:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: https://torch-template-bucket.s3.ap-northeast-1.amazonaws.com/lambda_group.yml
+      
+
+  # VPCの作成
+  NETWORK:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: https://slotsplitbill.s3.ap-northeast-1.amazonaws.com/template_network.yml
+      Parameters:
+        VPCCIDR: !Ref VPCCIDR
+        PublicSubnet1CIDR: !Ref PublicSubnet1CIDR
+        PublicSubnet2CIDR: !Ref PublicSubnet2CIDR
+        PrivateSubnet1CIDR: !Ref PrivateSubnet1CIDR
+        PrivateSubnet2CIDR: !Ref PrivateSubnet2CIDR
+        ALBName: !Ref ALBName
+        TargetGroupName: !Ref TargetGroupName
+        HostZoneId: !Ref HostZoneId
+        DomainName: !Ref DomainName
+        SubDomain: !Ref SubDomain
+  ECS:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: https://slotsplitbill.s3.ap-northeast-1.amazonaws.com/template_ECS.yml
+      Parameters:
+        ClusterName: !Ref ClusterName
+        TaskName: !Ref TaskName
+        TaskCPUUnit: !Ref TaskCPUUnit
+        TaskMemory: !Ref TaskMemory
+        ContainerName: !Ref ContainerName
+        ImageName: !Ref ImageName
+        ServiceName: !Ref ServiceName
+        TaskDesiredCount: !Ref TaskDesiredCount
+        ServiceScaleEvaluationPeriods: !Ref ServiceScaleEvaluationPeriods
+        ServiceCpuScaleOutThreshold: !Ref ServiceCpuScaleOutThreshold
+        ServiceCpuScaleInThreshold: !Ref ServiceCpuScaleInThreshold
+        TaskMinContainerCount: !Ref TaskMinContainerCount
+        TaskMaxContainerCount: !Ref TaskMaxContainerCount
+        TargetGroup: !GetAtt NETWORK.Outputs.TargetGroup
+        ECSSecurityGroup: !GetAtt NETWORK.Outputs.ECSSecurityGroup
+        PrivateSubnet1: !GetAtt NETWORK.Outputs.PrivateSubnet1
+        PrivateSubnet2: !GetAtt NETWORK.Outputs.PrivateSubnet2

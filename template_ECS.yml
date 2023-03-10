@@ -1,0 +1,262 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: ECS Template For slot
+
+Parameters:
+  #ECSClusterName
+  ClusterName:
+    Type: String
+
+#ECSTaskName
+  TaskName:
+    Type: String
+
+#ECSTaskCPUUnit
+  TaskCPUUnit:
+    Type: String
+
+#ECSTaskMemory
+  TaskMemory:
+    Type: String
+
+#ECSContainerName
+  ContainerName:
+    Type: String
+
+#ECSImageName
+  ImageName:
+    Type: String
+
+#ECSServiceName
+  ServiceName:
+    Type: String
+
+#ECSTaskDesiredCount
+  TaskDesiredCount:
+    Type: Number
+    
+  TargetGroup:
+    Type: String
+
+  ECSSecurityGroup:
+    Type: String
+    
+  PrivateSubnet1:
+    Type: String
+    
+  PrivateSubnet2:
+    Type: String
+
+# Scaling params
+  ServiceScaleEvaluationPeriods:
+    Description: The number of periods over which data is compared to the specified threshold
+    Type: Number
+
+  ServiceCpuScaleOutThreshold:
+    Type: Number
+    Description: Average CPU value to trigger auto scaling out
+
+  ServiceCpuScaleInThreshold:
+    Type: Number
+    Description: Average CPU value to trigger auto scaling in
+
+  TaskMinContainerCount:
+    Type: Number
+    Description: Minimum number of containers to run for the service
+
+  TaskMaxContainerCount:
+    Type: Number
+    Description: Maximum number of containers to run for the service when auto scaling out
+    
+Resources:
+　#WEBサーバー用のコンテナ作成
+  ECSCluster:
+    Type: "AWS::ECS::Cluster"
+    Properties:
+      ClusterName: !Sub "${ClusterName}"
+  
+  ECSLogGroup:
+    Type: "AWS::Logs::LogGroup"
+    Properties:
+      LogGroupName: "/ecs/logs/torch-ecs-group"
+  
+  ECSTaskExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: "torch-ECSTaskExecutionRolePolicy"
+      Path: /
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
+        
+  ECSTaskDefinition:
+    Type: "AWS::ECS::TaskDefinition"
+    Properties:
+      Cpu: !Ref TaskCPUUnit
+      ExecutionRoleArn: !Ref ECSTaskExecutionRole
+      Family: !Sub "${TaskName}"
+      Memory: !Ref TaskMemory
+      NetworkMode: awsvpc
+      RequiresCompatibilities:
+        - FARGATE
+
+#ContainerDefinitions
+      ContainerDefinitions:
+        - Name: !Sub "${ContainerName}"
+          Image: !Ref ImageName
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref ECSLogGroup
+              awslogs-region: !Ref "AWS::Region"
+              awslogs-stream-prefix: "torch"
+          MemoryReservation: 128
+          PortMappings:
+            - HostPort: 80
+              Protocol: tcp
+              ContainerPort: 80
+  
+  ECSService:
+    Type: AWS::ECS::Service
+    Properties:
+      Cluster: !Ref ECSCluster
+      DesiredCount: !Ref TaskDesiredCount
+      LaunchType: FARGATE
+      LoadBalancers:
+        -
+          TargetGroupArn: !Ref TargetGroup
+          ContainerPort: 80
+          ContainerName: !Sub "${ContainerName}"
+      NetworkConfiguration:
+       AwsvpcConfiguration:
+           AssignPublicIp: ENABLED
+           SecurityGroups:
+             - !Ref ECSSecurityGroup
+           Subnets:
+             - !Ref PrivateSubnet1
+             - !Ref PrivateSubnet2
+      ServiceName: !Sub "${ServiceName}"
+      TaskDefinition: !Ref ECSTaskDefinition
+  
+  #コンテナでのオートスケーリング設定
+  ServiceAutoScalingRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: application-autoscaling.amazonaws.com
+            Action: sts:AssumeRole
+      Path: /
+      Policies:
+        - PolicyName: !Sub "${ContainerName}-autoscaling"
+          PolicyDocument:
+            Statement:
+              - Effect: Allow
+                Action:
+                  - application-autoscaling:*
+                  - cloudwatch:DescribeAlarms
+                  - cloudwatch:PutMetricAlarm
+                  - ecs:DescribeServices
+                  - ecs:UpdateService
+                Resource: '*'
+  
+  ServiceScalingTarget:
+    Type: AWS::ApplicationAutoScaling::ScalableTarget
+    Properties:
+      MinCapacity: !Ref TaskMinContainerCount
+      MaxCapacity: !Ref TaskMaxContainerCount
+      ResourceId: !Sub
+        - service/${EcsClusterName}/${EcsDefaultServiceName}
+        - EcsClusterName: !Ref ECSCluster
+          EcsDefaultServiceName: !Sub "${ServiceName}"
+      RoleARN: !GetAtt ServiceAutoScalingRole.Arn
+      ScalableDimension: ecs:service:DesiredCount
+      ServiceNamespace: ecs
+    DependsOn:
+      - ECSService
+      - ServiceAutoScalingRole
+  
+  ServiceScaleOutPolicy:
+    Type: AWS::ApplicationAutoScaling::ScalingPolicy
+    Properties:
+      PolicyName: !Sub "${ServiceName}-ScaleOutPolicy"
+      PolicyType: StepScaling
+      ScalingTargetId: !Ref ServiceScalingTarget
+      StepScalingPolicyConfiguration:
+        AdjustmentType: ChangeInCapacity
+        Cooldown: 60
+        MetricAggregationType: Average
+        StepAdjustments:
+          - ScalingAdjustment: 1
+            MetricIntervalLowerBound: 0
+    DependsOn: ServiceScalingTarget
+
+  ServiceScaleInPolicy:
+    Type: AWS::ApplicationAutoScaling::ScalingPolicy
+    Properties:
+      PolicyName: !Sub "${ServiceName}-ScaleInPolicy"
+      PolicyType: StepScaling
+      ScalingTargetId: !Ref ServiceScalingTarget
+      StepScalingPolicyConfiguration:
+        AdjustmentType: ChangeInCapacity
+        Cooldown: 60
+        MetricAggregationType: Average
+        StepAdjustments:
+          - ScalingAdjustment: -1
+            MetricIntervalUpperBound: 0
+    DependsOn: ServiceScalingTarget
+  
+  ServiceScaleOutAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "${ServiceName}-ScaleOutAlarm"
+      EvaluationPeriods: !Ref ServiceScaleEvaluationPeriods
+      Statistic: Average
+      TreatMissingData: notBreaching
+      Threshold: !Ref ServiceCpuScaleOutThreshold
+      AlarmDescription: Alarm to add capacity if CPU is high
+      Period: 60
+      AlarmActions:
+        - !Ref ServiceScaleOutPolicy
+      Namespace: AWS/ECS
+      Dimensions:
+        - Name: ClusterName
+          Value: !Ref ECSCluster
+        - Name: ServiceName
+          Value: !Sub "${ServiceName}"
+      ComparisonOperator: GreaterThanThreshold
+      MetricName: CPUUtilization
+    DependsOn:
+      - ECSService
+      - ServiceScaleOutPolicy
+
+  ServiceScaleInAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "${ServiceName}-ScaleInAlarm"
+      EvaluationPeriods: !Ref ServiceScaleEvaluationPeriods
+      Statistic: Average
+      TreatMissingData: notBreaching
+      Threshold: !Ref ServiceCpuScaleInThreshold
+      AlarmDescription: Alarm to reduce capacity if container CPU is low
+      Period: 300
+      AlarmActions:
+        - !Ref ServiceScaleInPolicy
+      Namespace: AWS/ECS
+      Dimensions:
+        - Name: ClusterName
+          Value: !Ref ECSCluster
+        - Name: ServiceName
+          Value: !Sub "${ServiceName}"
+      ComparisonOperator: LessThanThreshold
+      MetricName: CPUUtilization
+    DependsOn:
+      - ECSService
+      - ServiceScaleInPolicy

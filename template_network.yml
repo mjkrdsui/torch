@@ -1,0 +1,323 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Network Template For Slot
+
+Parameters:
+          
+  VPCCIDR:
+    Type: String
+
+  PublicSubnet1CIDR:
+    Type: String
+
+  PublicSubnet2CIDR:
+    Type: String
+
+  PrivateSubnet1CIDR:
+    Type: String
+
+  PrivateSubnet2CIDR:
+    Type: String
+#InternetALB
+  ALBName:
+    Type: String
+#TargetGroupName
+  TargetGroupName:
+    Type: String
+  HostZoneId:
+    Type: String
+  DomainName:
+    Type: String
+  SubDomain:
+    Type: String
+
+Resources:
+  VPC: 
+    Type: "AWS::EC2::VPC"
+    Properties: 
+      CidrBlock: !Ref VPCCIDR
+      EnableDnsSupport: "true"
+      EnableDnsHostnames: "true"
+      InstanceTenancy: default
+      Tags: 
+        - Key: Name
+          Value: "torch-vpc"
+  InternetGateway: 
+    Type: "AWS::EC2::InternetGateway"
+    Properties: 
+      Tags: 
+        - Key: Name
+          Value: "torch-igw"
+          
+  #VPCとInternetGatewayをつなげる
+  InternetGatewayAttachment: 
+    Type: "AWS::EC2::VPCGatewayAttachment"
+    Properties: 
+      InternetGatewayId: !Ref InternetGateway
+      VpcId: !Ref VPC 
+      
+  PublicSubnet1: 
+    Type: "AWS::EC2::Subnet"
+    Properties: 
+      AvailabilityZone: "ap-northeast-1a"
+      CidrBlock: !Ref PublicSubnet1CIDR
+      VpcId: !Ref VPC 
+      Tags: 
+        - Key: Name
+          Value: "torch-public-subnet-1"
+  PublicSubnet2: 
+    Type: "AWS::EC2::Subnet"
+    Properties: 
+      AvailabilityZone: "ap-northeast-1c"
+      CidrBlock: !Ref PublicSubnet2CIDR
+      VpcId: !Ref VPC 
+      Tags: 
+        - Key: Name
+          Value: "torch-public-subnet-2"
+  PrivateSubnet1: 
+    Type: "AWS::EC2::Subnet"
+    Properties: 
+      AvailabilityZone: "ap-northeast-1a"
+      CidrBlock: !Ref PrivateSubnet1CIDR
+      VpcId: !Ref VPC 
+      Tags: 
+        - Key: Name
+          Value: "torch-private-subnet-1"
+  PrivateSubnet2: 
+    Type: "AWS::EC2::Subnet"
+    Properties: 
+      AvailabilityZone: "ap-northeast-1c"
+      CidrBlock: !Ref PrivateSubnet2CIDR
+      VpcId: !Ref VPC 
+      Tags: 
+        - Key: Name
+          Value: "torch-private-subnet-2"
+          
+  NatGateway1EIP:
+    Type: AWS::EC2::EIP
+    Properties:
+      Domain: vpc
+
+  NatGateway2EIP:
+    Type: AWS::EC2::EIP
+    Properties:
+      Domain: vpc
+
+  NatGateway1:
+    Type: AWS::EC2::NatGateway
+    Properties:
+      AllocationId: !GetAtt NatGateway1EIP.AllocationId
+      SubnetId: !Ref PublicSubnet1
+
+  NatGateway2:
+    Type: AWS::EC2::NatGateway
+    Properties:
+      AllocationId: !GetAtt NatGateway2EIP.AllocationId
+      SubnetId: !Ref PublicSubnet2
+      
+  #以下ルートテーブル作成
+  PublicRouteTable1: 
+    Type: "AWS::EC2::RouteTable"
+    Properties: 
+      VpcId: !Ref VPC 
+      Tags: 
+        - Key: Name
+          Value: "torch-public-route-1"
+  PublicRouteTable2: 
+    Type: "AWS::EC2::RouteTable"
+    Properties: 
+      VpcId: !Ref VPC 
+      Tags: 
+        - Key: Name
+          Value: "torch-public-route-2"
+  PrivateRouteTable1: 
+    Type: "AWS::EC2::RouteTable"
+    Properties: 
+      VpcId: !Ref VPC 
+      Tags: 
+        - Key: Name
+          Value: "torch-private-route-1"
+  PrivateRouteTable2: 
+    Type: "AWS::EC2::RouteTable"
+    Properties: 
+      VpcId: !Ref VPC 
+      Tags: 
+        - Key: Name
+          Value: "torch-private-route-2"
+  
+  # 以下実際のルートを作成
+  PublicRoute1: 
+    Type: "AWS::EC2::Route"
+    Properties: 
+      RouteTableId: !Ref PublicRouteTable1
+      DestinationCidrBlock: "0.0.0.0/0"
+      GatewayId: !Ref InternetGateway 
+
+# PublicRouteC Create
+  PublicRoute2: 
+    Type: "AWS::EC2::Route"
+    Properties: 
+      RouteTableId: !Ref PublicRouteTable2
+      DestinationCidrBlock: "0.0.0.0/0"
+      GatewayId: !Ref InternetGateway 
+  
+  PrivateRoute1: 
+    Type: "AWS::EC2::Route"
+    Properties: 
+      RouteTableId: !Ref PrivateRouteTable1
+      DestinationCidrBlock: "0.0.0.0/0"
+      NatGatewayId: !Ref NatGateway1
+      
+  PrivateRoute2: 
+    Type: "AWS::EC2::Route"
+    Properties: 
+      RouteTableId: !Ref PrivateRouteTable2
+      DestinationCidrBlock: "0.0.0.0/0"
+      NatGatewayId: !Ref NatGateway1 
+      
+#以下サブネットとルートテーブルを関連付け
+      
+# PublicRouteTable Associate SubnetA
+  PublicSubnetARouteTableAssociation: 
+    Type: "AWS::EC2::SubnetRouteTableAssociation"
+    Properties:
+      SubnetId: !Ref PublicSubnet1
+      RouteTableId: !Ref PublicRouteTable1
+
+# PublicRouteTable Associate SubnetC
+  PublicSubnetCRouteTableAssociation: 
+    Type: "AWS::EC2::SubnetRouteTableAssociation"
+    Properties: 
+      SubnetId: !Ref PublicSubnet2
+      RouteTableId: !Ref PublicRouteTable2
+
+# PrivateRouteTable Associate SubnetA
+  PrivateSubnetARouteTableAssociation: 
+    Type: "AWS::EC2::SubnetRouteTableAssociation"
+    Properties: 
+      SubnetId: !Ref PrivateSubnet1
+      RouteTableId: !Ref PrivateRouteTable1
+
+# PrivateRouteTable Associate SubnetC
+  PrivateSubnetCRouteTableAssociation: 
+    Type: "AWS::EC2::SubnetRouteTableAssociation"
+    Properties: 
+      SubnetId: !Ref PrivateSubnet2
+      RouteTableId: !Ref PrivateRouteTable2
+      
+  #ロードバランサー用のセキュリティグループ    
+  ELBSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: for ELB
+      GroupName: ELB    
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        -
+          IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
+　#ECS用のセキュリティグループ
+  ECSSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: for ECS
+      GroupName: ECS   
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        -
+          IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          SourceSecurityGroupId: !Ref ELBSecurityGroup
+      
+　#ELBのターゲットグループ設定
+  TargetGroup:
+    Type: "AWS::ElasticLoadBalancingV2::TargetGroup"
+    Properties:
+      VpcId: !Ref VPC
+      Name: !Sub "${TargetGroupName}"
+      Protocol: HTTP
+      Port: 80
+      TargetType: ip
+  #ELBを作成    
+  InternetALB:
+    Type: "AWS::ElasticLoadBalancingV2::LoadBalancer"
+    Properties:
+      Name: !Sub "${ALBName}"
+      Tags:
+        - Key: Name
+          Value: !Sub "${ALBName}"
+      Scheme: "internet-facing"
+      LoadBalancerAttributes:
+        - Key: "deletion_protection.enabled"
+          Value: false
+        - Key: "idle_timeout.timeout_seconds"
+          Value: 60
+        - Key: "access_logs.s3.enabled"
+          Value: false
+      SecurityGroups:
+        - !Ref ELBSecurityGroup
+      Subnets:
+        - !Ref PublicSubnet1
+        - !Ref PublicSubnet2
+  #HTTP用のリスナー設定    
+  ALBListenerHTTP: 
+    Type: "AWS::ElasticLoadBalancingV2::Listener"
+    Properties: 
+      Port: 80
+      Protocol: HTTP
+      DefaultActions: 
+        - Type: redirect
+          RedirectConfig: 
+            Host: '#{host}'
+            Path: '/#{path}'
+            Port: 443
+            Protocol: HTTPS
+            Query: '#{query}'
+            StatusCode: HTTP_301
+      LoadBalancerArn: !Ref InternetALB
+  
+  #HTTPS用のリスナー設定
+  ALBListenerHTTPS:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      Port: 443
+      Protocol: HTTPS
+      Certificates:
+        - CertificateArn: !Ref ACM
+      DefaultActions:
+        - TargetGroupArn: !Ref TargetGroup
+          Type: forward
+      LoadBalancerArn: !Ref InternetALB
+  #route53にレコードを設定    
+  DnsRecord:
+    Type: AWS::Route53::RecordSet
+    Properties:
+      HostedZoneId: !Sub '${HostZoneId}'
+      Comment: "DNS for ALB"
+      Name: !Sub '${SubDomain}'
+      Type: A
+      AliasTarget:
+        HostedZoneId: !GetAtt 'InternetALB.CanonicalHostedZoneID'
+        DNSName: !GetAtt 'InternetALB.DNSName'
+        
+  #証明書発行
+  ACM:
+    Type: AWS::CertificateManager::Certificate
+    Properties:
+      DomainName: !Sub '${SubDomain}'
+      DomainValidationOptions:
+        - DomainName: !Sub '${SubDomain}'
+          HostedZoneId: !Sub '${HostZoneId}'
+      ValidationMethod: DNS
+      
+Outputs:
+  TargetGroup:
+    Value: !Ref TargetGroup
+  ECSSecurityGroup:
+    Value: !Ref ECSSecurityGroup
+  PrivateSubnet1:
+    Value: !Ref PrivateSubnet1
+  PrivateSubnet2:
+    Value: !Ref PrivateSubnet2
