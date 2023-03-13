@@ -26,7 +26,7 @@ def handler(event, context):
     new_local_path = '/tmp/' + currentDate + '-' + currentTime + '-after'
     cv2.imwrite(new_local_path, calibrateImage(local_path))
     
-    bucket2 = s3.Bucket('torch-image-distorted')
+    bucket2 = s3.Bucket('torchcom-image-undistortion')
     bucket2.upload_file(new_local_path, file_name)
 
 # カメラの歪みをCSVファイルを元に補正する関数
