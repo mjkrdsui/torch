@@ -32,7 +32,7 @@ else:
 """ """
 def handler(event, context):
     s3 = boto3.resource('s3')
-    bucket_name = "torch-image-corrected"
+    bucket_name = "torchcom-image-corrected-cp"
     bucket = s3.Bucket(bucket_name)
     objs = bucket.objects.all()
     timelaps(objs)
@@ -51,7 +51,7 @@ def timelaps(images):
             res3 = re.match(".{9}[0-3].15-20.+",i.key)
             if res1 or res2 or res3:
             　　#タイムラプスを作成
-                bucket = s3.Bucket("torch-image-corrected")
+                bucket = s3.Bucket("torchcom-image-corrected-cp")
                 print(i.key)
                 currentDate = i.key.split('/')[0]
                 currentTime = i.key.split('/')[1]
@@ -63,7 +63,7 @@ def timelaps(images):
         
     video.release()
     #タイムラプスをバケットに格納
-    bucket2 = s3.Bucket('torch-timelaps')
+    bucket2 = s3.Bucket('torchcom-timelapse')
     bucket2.upload_file('timelaps.mp4', 'timelaps.mp4')
     #print("画像の総枚数{0}".format(len(objs)))
   
